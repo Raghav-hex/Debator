@@ -8,42 +8,23 @@ import google.generativeai as genai
 app = Flask(__name__)
 
 # --- API KEY ROTATION ---
-api_keys =[
-    os.environ.get("GEMINI_API_KEY_1"),
-    os.environ.get("GEMINI_API_KEY_2"),
-    os.environ.get("GEMINI_API_KEY_3")
-]
-valid_keys =[key for key in api_keys if key]
-
-if not valid_keys:
-    raise ValueError("No Gemini API keys found. Please set GEMINI_API_KEY_1, etc.")
-
+api_keys =[os.environ.get(f"GEMINI_API_KEY_{i}") for i in range(1, 4)]
+valid_keys = [key for key in api_keys if key]
 key_rotator = itertools.cycle(valid_keys)
 
 def get_ai_response(system_prompt, user_prompt):
-    current_key = next(key_rotator)
-    genai.configure(api_key=current_key)
-    
-    # Increased max_output_tokens to 1500 to prevent truncation
+    genai.configure(api_key=next(key_rotator))
+    # Using 800 tokens: enough for ~600 words. Prevents mid-sentence cut-offs.
     model = genai.GenerativeModel(
         model_name="gemini-2.5-flash",
         system_instruction=system_prompt,
-        generation_config={
-            "temperature": 0.8, 
-            "max_output_tokens": 1500,
-            "top_p": 0.95
-        }
+        generation_config={"temperature": 0.7, "max_output_tokens": 800}
     )
-    
     try:
         response = model.generate_content(user_prompt)
-        # Check if the model stopped because it hit the token limit
-        if response.candidates[0].finish_reason != 1: # 1 is STOP
-            print(f"Warning: Model finished with reason {response.candidates[0].finish_reason}")
-            
-        return response.text.strip()
+        return response.text.strip() if response.text else "..."
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"Debate interrupted: {str(e)}"
 
 @app.route('/')
 def index():
@@ -56,58 +37,32 @@ def debate():
     def generate():
         debate_log =[]
         
-        pro_system = f"""You are a master orator and elite intellectual debating IN FAVOR of the topic: '{topic}'.
-RULES:
-1. Never agree with or concede points.
-2. Use sharp analogies and philosophical logic.
-3. Ruthlessly deconstruct your opponent's fallacies.
-4. Tone: Aggressive but sophisticated.
-5. COMPLETE YOUR THOUGHTS: Ensure every sentence is finished and your argument is fully fleshed out."""
-
-        con_system = f"""You are a brilliant, relentlessly skeptical debater arguing AGAINST the topic: '{topic}'.
-RULES:
-1. Never agree with or concede points.
-2. Exploit blind spots, contradictions, and logical gaps in the opponent's arguments.
-3. Play offense, attacking the foundation of their premise.
-4. Tone: Cold, calculating, and unapologetically critical.
-5. COMPLETE YOUR THOUGHTS: Ensure every sentence is finished and your argument is fully fleshed out."""
-
-        judge_system = f"You are the Supreme Arbiter of a debate on '{topic}'. Evaluate logic, rebuttal quality, and rhetoric. Declare a definitive winner. Provide a detailed final verdict with critique and the turning point."
-
-        current_speaker = "Pro"
+        # New Persona: Complex ideas, simple, accessible words.
+        pro_system = f"You are debating FOR '{topic}'. Use simple, clear language to explain complex ideas. Be punchy, aggressive, and never concede."
+        con_system = f"You are debating AGAINST '{topic}'. Use simple, clear language to explain complex ideas. Be punchy, skeptical, and never concede."
         
         for i in range(30):
-            recent_turns = debate_log[-4:] 
-            history_text = "\n".join([f"[{t['speaker']}]: {t['text']}" for t in recent_turns])
+            instruction = "Start strong." if i == 0 else "Refute the last point and advance your own."
+            history = "\n".join([f"[{t['speaker']}]: {t['text']}" for t in debate_log[-4:]])
             
-            instruction = "Start the debate with a strong opening." if i == 0 else "Refute the last point and advance your argument."
+            prompt = f"History:\n{history}\n\nTask: {instruction}\nRules: Use simple words, explain complex concepts clearly. Max 2 paragraphs. Finish your sentences."
             
-            user_prompt = f"""--- DEBATE HISTORY ---
-{history_text}
-----------------------
-YOUR TASK: {instruction}
-CRITICAL: Do not repeat previous points. Do not quote the opponent. Write a complete, logical, and fully formed response."""
-            
-            if current_speaker == "Pro":
-                content = get_ai_response(pro_system, user_prompt)
+            if i % 2 == 0:
+                content = get_ai_response(pro_system, prompt)
                 debate_log.append({"speaker": "Pro", "text": content})
-                current_speaker = "Con"
-                sender_name = "Debater A (Pro)"
+                yield f"data: {json.dumps({'type': 'message', 'sender': 'Debater A (Pro)', 'text': content})}\n\n"
             else:
-                content = get_ai_response(con_system, user_prompt)
+                content = get_ai_response(con_system, prompt)
                 debate_log.append({"speaker": "Con", "text": content})
-                current_speaker = "Pro"
-                sender_name = "Debater B (Con)"
+                yield f"data: {json.dumps({'type': 'message', 'sender': 'Debater B (Con)', 'text': content})}\n\n"
+            
+            time.sleep(1) # Keep connection alive
 
-            yield f"data: {json.dumps({'type': 'message', 'sender': sender_name, 'text': content})}\n\n"
-            time.sleep(1.5)
-
-        # Judging
-        formatted_transcript = "\n\n".join([f"[{t['speaker']}]: {t['text']}" for t in debate_log])
-        verdict = get_ai_response(judge_system, f"Here is the debate:\n{formatted_transcript}\n\nDeclare a winner and provide detailed reasoning.")
+        verdict = get_ai_response("You are the judge.", f"Debate transcript:\n{debate_log}\n\nDeclare a winner and explain why.")
         yield f"data: {json.dumps({'type': 'verdict', 'sender': 'Neutral Judge', 'text': verdict})}\n\n"
 
-    return Response(generate(), mimetype='text/event-stream')
+    # Important: Set headers for streaming stability
+    return Response(generate(), mimetype='text/event-stream', headers={'X-Accel-Buffering': 'no'})
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
