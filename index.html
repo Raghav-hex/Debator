@@ -2,209 +2,35 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gemini Debate Arena</title>
+    <title>AI Debate Arena</title>
     <style>
-        :root {
-            --bg-color: #121212;
-            --text-color: #e0e0e0;
-            --pro-color: #1a365d;
-            --pro-border: #3182ce;
-            --con-color: #5f1015;
-            --con-border: #e53e3e;
-            --judge-color: #4a3f00;
-            --judge-border: #ecc94b;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            height: 100vh;
-            box-sizing: border-box;
-        }
-
-        h1 {
-            margin-top: 0;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            text-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
-        }
-
-        .controls {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-            width: 100%;
-            max-width: 800px;
-        }
-
-        input {
-            flex-grow: 1;
-            padding: 12px;
-            border-radius: 6px;
-            border: 1px solid #333;
-            background: #1e1e1e;
-            color: #fff;
-            font-size: 16px;
-        }
-
-        button {
-            padding: 12px 24px;
-            background: #3182ce;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: bold;
-            transition: background 0.2s;
-        }
-
-        button:hover { background: #2b6cb0; }
-        button:disabled { background: #4a5568; cursor: not-allowed; }
-
-        .arena {
-            flex-grow: 1;
-            width: 100%;
-            max-width: 800px;
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 10px;
-            padding: 20px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-            box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
-        }
-
-        .message {
-            max-width: 80%;
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid transparent;
-            line-height: 1.5;
-            animation: fadeIn 0.4s ease-in-out;
-        }
-
-        .message.pro {
-            background-color: var(--pro-color);
-            border-left-color: var(--pro-border);
-            align-self: flex-start;
-        }
-
-        .message.con {
-            background-color: var(--con-color);
-            border-left-color: var(--con-border);
-            align-self: flex-end;
-        }
-
-        .message.verdict {
-            background-color: var(--judge-color);
-            border-left-color: var(--judge-border);
-            align-self: center;
-            max-width: 95%;
-            font-size: 1.1em;
-            box-shadow: 0 0 15px rgba(236, 201, 75, 0.2);
-        }
-
-        .sender {
-            font-size: 0.85em;
-            font-weight: bold;
-            margin-bottom: 5px;
-            opacity: 0.8;
-            text-transform: uppercase;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .typing {
-            align-self: center;
-            font-style: italic;
-            color: #888;
-            display: none;
-            margin-top: 10px;
-        }
+        body { background: #121212; color: #fff; font-family: sans-serif; padding: 20px; }
+        .arena { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 15px; }
+        .message { padding: 15px; border-radius: 8px; border-left: 5px solid; }
+        .pro { background: #1a365d; border-color: #3182ce; }
+        .con { background: #5f1015; border-color: #e53e3e; }
+        .verdict { background: #4a3f00; border-color: #ecc94b; text-align: center; }
     </style>
 </head>
 <body>
-
-    <h1>Gemini Debate Arena</h1>
-    
-    <div class="controls">
-        <input type="text" id="topic" placeholder="E.g., We live in a simulation">
-        <button id="startBtn" onclick="startDebate()">Start Debate</button>
+    <div class="arena" id="arena">
+        <input type="text" id="topic" value="We live in a simulation">
+        <button onclick="startDebate()">Start</button>
     </div>
-
-    <div class="arena" id="arena"></div>
-    <div class="typing" id="typingIndicator">Gemini agents are formulating arguments...</div>
-
     <script>
-        let eventSource;
-
-        function formatText(text) {
-            // Convert newlines to <br> and **text** to <strong>text</strong>
-            let formatted = text.replace(/\n/g, '<br>');
-            formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-            return formatted;
-        }
-
         function startDebate() {
-            const topic = document.getElementById('topic').value.trim();
-            if (!topic) return alert("Please enter a topic!");
-
             const arena = document.getElementById('arena');
-            const startBtn = document.getElementById('startBtn');
-            const typing = document.getElementById('typingIndicator');
+            const topic = document.getElementById('topic').value;
+            const source = new EventSource(`/debate?topic=${encodeURIComponent(topic)}`);
             
-            arena.innerHTML = '';
-            startBtn.disabled = true;
-            typing.style.display = 'block';
-
-            if (eventSource) eventSource.close();
-
-            eventSource = new EventSource(`/debate?topic=${encodeURIComponent(topic)}`);
-
-            eventSource.onmessage = function(event) {
-                const data = JSON.parse(event.data);
-                
-                const msgDiv = document.createElement('div');
-                let cssClass = '';
-                
-                if (data.type === 'verdict') cssClass = 'verdict';
-                else if (data.sender.includes('Pro')) cssClass = 'pro';
-                else cssClass = 'con';
-
-                msgDiv.className = `message ${cssClass}`;
-                
-                msgDiv.innerHTML = `
-                    <div class="sender">${data.sender}</div>
-                    <div>${formatText(data.text)}</div>
-                `;
-                
-                arena.appendChild(msgDiv);
-                arena.scrollTop = arena.scrollHeight;
-
-                if (data.type === 'verdict') {
-                    eventSource.close();
-                    startBtn.disabled = false;
-                    typing.style.display = 'none';
-                }
-            };
-
-            eventSource.onerror = function() {
-                eventSource.close();
-                startBtn.disabled = false;
-                typing.style.display = 'none';
+            source.onmessage = (e) => {
+                const data = JSON.parse(e.data);
+                const div = document.createElement('div');
+                div.className = `message ${data.type === 'verdict' ? 'verdict' : (data.sender.includes('Pro') ? 'pro' : 'con')}`;
+                div.innerHTML = `<strong>${data.sender}</strong><br>${data.text}`;
+                arena.appendChild(div);
+                window.scrollTo(0, document.body.scrollHeight);
+                if(data.type === 'verdict') source.close();
             };
         }
     </script>
